@@ -9,6 +9,7 @@ const handler = new SpotifyTokenHandler();
 const app = new Hono();
 
 app.get("/spotifytoken", handler.honoHandler);
+app.get("/clienttoken", handler.clientTokenHonoHandler);
 
 app.onError((err: unknown, c: Context) => {
 	logs("error", err);

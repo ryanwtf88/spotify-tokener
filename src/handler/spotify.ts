@@ -1,7 +1,7 @@
 import { SpotifyBrowser } from "./browser";
 import { Semaphore } from "../utils/semaphore";
 import { logs } from "../utils/logger";
-import type { SpotifyToken } from "../types/spotify";
+import type { SpotifyToken, SpotifyClientToken } from "../types/spotify";
 import type { Context } from "hono";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { handleRequest } from "./request";
@@ -9,7 +9,9 @@ import { handleRequest } from "./request";
 export class SpotifyTokenHandler {
 	private semaphore = new Semaphore();
 	private accessToken: SpotifyToken | undefined;
+	private clientToken: SpotifyClientToken | undefined;
 	private refreshTimeout: NodeJS.Timeout | undefined;
+	private clientRefreshTimeout: NodeJS.Timeout | undefined;
 	private browser = new SpotifyBrowser();
 
 	constructor() {
@@ -32,6 +34,25 @@ export class SpotifyTokenHandler {
 			}
 		};
 		tryInit();
+
+		const tryInitClient = async (attempt = 1) => {
+			try {
+				const token = await this.getClientToken();
+				this.clientToken = token;
+				const elapsed = Date.now() - initFetch;
+				logs("info", `Initial Spotify client token fetched in ${elapsed}ms`);
+			} catch (err) {
+				logs(
+					"warn",
+					`Failed to fetch initial Spotify client token (attempt ${attempt})`,
+					err,
+				);
+				if (attempt < 3) {
+					setTimeout(() => tryInitClient(attempt + 1), 2000 * attempt);
+				}
+			}
+		};
+		tryInitClient();
 	}
 
 	// Cleanup method
@@ -67,6 +88,41 @@ export class SpotifyTokenHandler {
 		}, refreshIn);
 	}
 
+	private setClientRefresh() {
+		if (this.clientRefreshTimeout) clearTimeout(this.clientRefreshTimeout);
+		const token = this.clientToken;
+		if (!token) return;
+		const now = Date.now();
+		let refreshIn: number;
+		const clientTokenRecord = token as Record<string, unknown>;
+		if (typeof clientTokenRecord.refreshAfterTimestampMs === "number") {
+			refreshIn = Math.max(
+				(clientTokenRecord.refreshAfterTimestampMs as number) - now + 100,
+				0,
+			);
+		} else {
+			refreshIn = Math.max(
+				token.accessTokenExpirationTimestampMs - now + 100,
+				0,
+			);
+		}
+		this.clientRefreshTimeout = setTimeout(async () => {
+			try {
+				const release = await this.semaphore.acquire();
+				try {
+					const newToken = await this.getClientToken();
+					this.clientToken = newToken;
+					logs("info", "Spotify client token auto-refreshed (timeout)");
+				} finally {
+					release();
+				}
+			} catch (err) {
+				logs("warn", "Failed to auto-refresh Spotify client token", err);
+			}
+			this.setClientRefresh();
+		}, refreshIn);
+	}
+
 	private getAccessToken = async (
 		cookies?: Array<{ name: string; value: string }>,
 	): Promise<SpotifyToken> => {
@@ -79,6 +135,24 @@ export class SpotifyTokenHandler {
 					resolve(token);
 				} catch (err) {
 					logs("error", "Error in getAccessToken", err);
+					reject(err);
+				}
+			};
+			run();
+		});
+	};
+
+	private getClientToken = async (): Promise<SpotifyClientToken> => {
+		return new Promise<SpotifyClientToken>((resolve, reject) => {
+			const run = async () => {
+				try {
+					const token =
+						(await this.browser.fetchClientToken()) as SpotifyClientToken;
+					this.clientToken = token;
+					this.setClientRefresh();
+					resolve(token);
+				} catch (err) {
+					logs("error", "Error in getClientToken", err);
 					reject(err);
 				}
 			};
@@ -133,6 +207,40 @@ export class SpotifyTokenHandler {
 		logs(
 			"info",
 			`Handled Spotify Token request from IP: ${ip}, UA: ${userAgent} (force: ${isForce}) in ${elapsed}ms`,
+		);
+		return result;
+	};
+
+	public clientTokenHonoHandler = async (c: Context): Promise<Response> => {
+		const isForce = ["1", "yes", "true"].includes(
+			(c.req.query("force") || "").toLowerCase(),
+		);
+		const connInfo = getConnInfo(c);
+		let ip = connInfo?.remote?.address || "unknown";
+		if (ip === "::1") {
+			ip = "127.0.0.1";
+		} else if (ip.startsWith("::ffff:")) {
+			ip = ip.replace("::ffff:", "");
+		}
+		const userAgent = c.req.header("user-agent") ?? "no ua";
+		const start = Date.now();
+
+		const result = await handleRequest(
+			c,
+			isForce,
+			() => this.getClientToken(),
+			() => this.clientToken,
+			(token) => {
+				this.clientToken = token;
+			},
+			this.semaphore,
+			undefined,
+			(token) => token.raw,
+		);
+		const elapsed = Date.now() - start;
+		logs(
+			"info",
+			`Handled Spotify Client Token request from IP: ${ip}, UA: ${userAgent} (force: ${isForce}) in ${elapsed}ms`,
 		);
 		return result;
 	};

@@ -6,7 +6,11 @@ import type {
 	Response,
 	Page,
 } from "playwright";
-import type { SpotifyToken } from "../types/spotify";
+import type {
+	SpotifyToken,
+	SpotifyClientToken,
+	ClientTokenResponse,
+} from "../types/spotify";
 import { logs } from "../utils/logger";
 
 export class SpotifyBrowser {
@@ -205,6 +209,145 @@ export class SpotifyBrowser {
 						if (shouldClosePage) await page.close();
 						logs("error", `Navigation failed: ${error}`);
 						reject(new Error(`Navigation failed: ${error}`));
+					}
+				}
+			})();
+		});
+	}
+
+	public async fetchClientToken(): Promise<SpotifyClientToken> {
+		const { context } = await this.ensureBrowser();
+
+		return new Promise<SpotifyClientToken>((resolve, reject) => {
+			(async () => {
+				let page = this.persistentPage;
+				let shouldClosePage = false;
+
+				if (!page || page.isClosed()) {
+					page = await context.newPage();
+					shouldClosePage = true;
+				}
+
+				let responseReceived = false;
+
+				try {
+					await context.clearCookies();
+
+					const timeout = setTimeout(() => {
+						if (!responseReceived) {
+							logs("error", "Client token fetch timeout");
+							if (shouldClosePage) page.close();
+							reject(new Error("Client token fetch exceeded deadline"));
+						}
+					}, 15000);
+
+					page.on("response", async (response: Response) => {
+						const url = response.url();
+						if (!url.includes("clienttoken.spotify.com/v1/clienttoken")) return;
+
+						responseReceived = true;
+						clearTimeout(timeout);
+
+						try {
+							if (!response.ok()) {
+								if (shouldClosePage) await page.close();
+								return reject(
+									new Error("Invalid response from clienttoken endpoint"),
+								);
+							}
+
+							const responseBody = await response.text();
+							let json: unknown;
+							try {
+								json = JSON.parse(responseBody);
+							} catch {
+								if (shouldClosePage) await page.close();
+								logs("error", "Failed to parse client token response JSON");
+								return reject(
+									new Error("Failed to parse client token response JSON"),
+								);
+							}
+
+							if (
+								json &&
+								typeof json === "object" &&
+								json !== null &&
+								"granted_token" in (json as Record<string, unknown>)
+							) {
+								const raw = json as ClientTokenResponse;
+								const granted = raw.granted_token;
+								const now = Date.now();
+								const expiresAfter = Number(granted.expires_after_seconds ?? 0);
+								const refreshAfter = Number(granted.refresh_after_seconds ?? 0);
+								const clientToken: SpotifyClientToken = {
+									raw,
+									accessToken: granted.token,
+									accessTokenExpirationTimestampMs: now + expiresAfter * 1000,
+									refreshAfterTimestampMs:
+										refreshAfter > 0 ? now + refreshAfter * 1000 : undefined,
+								};
+
+								if (shouldClosePage) await page.close();
+								return resolve(clientToken);
+							}
+
+							if (shouldClosePage) await page.close();
+							return reject(
+								new Error(
+									"Unexpected client token response: missing granted_token",
+								),
+							);
+						} catch (error) {
+							if (shouldClosePage) await page.close();
+							logs(
+								"error",
+								`Failed to process client token response: ${error}`,
+							);
+							reject(
+								new Error(`Failed to process client token response: ${error}`),
+							);
+						}
+					});
+
+					await page.route("**/*", (route) => {
+						const url = route.request().url();
+						const type = route.request().resourceType();
+
+						const blockedTypes = new Set([
+							"image",
+							"stylesheet",
+							"font",
+							"media",
+							"websocket",
+							"other",
+						]);
+
+						const blockedPatterns = [
+							"google-analytics",
+							"doubleclick.net",
+							"googletagmanager.com",
+							"https://open.spotifycdn.com/cdn/images/",
+							"https://encore.scdn.co/fonts/",
+						];
+
+						const isBlockedUrl = (u: string) =>
+							blockedPatterns.some((pat) => u.includes(pat));
+
+						if (blockedTypes.has(type) || isBlockedUrl(url)) {
+							route.abort();
+							return;
+						}
+
+						route.continue();
+					});
+
+					// Navigating to the main site triggers the clienttoken request as well
+					await page.goto("https://open.spotify.com/");
+				} catch (error) {
+					if (!responseReceived) {
+						if (shouldClosePage) await page.close();
+						logs("error", `Navigation failed (client token): ${error}`);
+						reject(new Error(`Navigation failed (client token): ${error}`));
 					}
 				}
 			})();
