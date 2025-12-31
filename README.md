@@ -1,82 +1,102 @@
-# Accessify
+# Spotify Tokener
 
-> **Credit:** This project is based on [devoxin/anonify](https://github.com/devoxin/anonify) with refactoring and adaptation for LavaSrc and general Spotify access token needs.
+> **Note:** This project is a unified fork of [idMJA/accessify](https://github.com/idMJA/accessify) and Solify. It combines the token generation capabilities of Accessify with the playlist and recommendation features of Solify into a single, cohesive API.
 
-A simple REST API to generate and cache anonymous Spotify access tokens using Playwright. This project is primarily designed for use as a custom anonymous token endpoint for [LavaSrc](https://github.com/topi314/LavaSrc) on Lavalink, but can be used in any application or service that needs a fresh Spotify access token.
-
-> **Alternative:** For a compiled/binary version, you can use [accessify-rs](https://github.com/idMJA/accessify-rs) — a Rust port of this project.
+A robust REST API to generate anonymous Spotify access tokens, fetch full playlists, and retrieve track recommendations using Playwright and Spotify's internal APIs.
 
 ## Features
-- Generate anonymous Spotify access tokens (browser automation, Playwright)
-- Designed for seamless integration with LavaSrc/Lavalink (`customTokenEndpoint`)
-- Can be used by any service needing a Spotify access token
-- Token caching with force refresh support
-- Concurrency-safe (Semaphore)
-- Fast REST API (Hono framework)
-- TypeScript, modular and maintainable structure
+
+- **Anonymous Token Generation**: Fetches valid Spotify access tokens using browser automation (Playwright).
+- **Full Playlist Fetching**: Retrieves all tracks from a playlist (bypassing the 100-track limit of standard scraped responses).
+- **Recommendations**: Generates track recommendations based on a seed track.
+- **Unified API**: Single endpoint structure for all Spotify-related needs.
+- **Concurrency Safe**: Uses semaphores to manage browser resources and token refreshing.
+- **Performance**: Built on the Hono framework and optimized for Bun.
 
 ## Requirements
-- Node.js 18+
-- Chromium browser (see below for installation instructions)
 
-## Install dependencies
+- **WSL (Windows Subsystem for Linux)**: Recommended environment for Windows users (Ubuntu distribution).
+- **Bun**: Fast JavaScript runtime.
+- **Chromium**: Required for Playwright to generate tokens.
+
+## Installation
+
+1.  **Install Bun**:
+    ```bash
+    curl -fsSL https://bun.sh/install | bash
+    ```
+
+2.  **Install Dependencies**:
+    ```bash
+    bun install
+    ```
+
+3.  **Install Chromium**:
+    If you are on Ubuntu/WSL:
+    ```bash
+    sudo apt update && sudo apt install chromium-browser
+    # OR
+    sudo snap install chromium
+    ```
+    Then set `BROWSER_PATH` in your `.env` file.
+
+## Configuration
+
+Create a `.env` file in the root directory:
+
+```properties
+PORT=3012
+BROWSER_PATH=/snap/bin/chromium  # Adjust path to your Chromium executable
+HEADLESS=true
+```
+
+## Running the Server
 
 ```bash
-npm install
+bun run dev
+# OR
+bun src/server.ts
 ```
 
-## Chromium Installation
+## API Endpoints
 
-### For most environments (not Pterodactyl):
-Install Playwright's bundled Chromium automatically:
+### 1. Get Access Token
+Returns a fresh Spotify access token.
 
-```bash
-npx playwright install chromium
-```
+- **URL**: `/api/token`
+- **Method**: `GET`
+- **Response**:
+  ```json
+  {
+    "accessToken": "BQb...",
+    "accessTokenExpirationTimestampMs": 1712345678900,
+    "isAnonymous": true,
+    "clientId": "..."
+  }
+  ```
 
-### For Pterodactyl (or restricted environments):
-1. **Download Chromium**
-   - Download a compatible Chromium build from [https://commondatastorage.googleapis.com/chromium-browser-snapshots/index.html](https://commondatastorage.googleapis.com/chromium-browser-snapshots/index.html) (choose your OS/arch, e.g. Linux x64).
-2. **Extract the archive** and upload the `chrome`/`chromium` binary (and its folder) to your Pterodactyl server, e.g. `/home/container/chrome-linux/chrome`.
-3. **Set the path in `.env`**:
-   ```properties
-   CHROME_PATH=/home/container/chrome-linux/chrome
-   ```
-4. **Restart your server/container**.
+### 2. Get Full Playlist
+Fetches all tracks from a playlist.
 
-If `CHROME_PATH` is not set, Playwright will use its default browser (if installed).
+- **URL**: `/playlist/full/:id`
+- **Method**: `GET`
+- **Query Params**:
+  - `limit`: (Optional) Limit the number of tracks.
+- **Example**: `http://localhost:3012/playlist/full/37i9dQZF1DXcBWIGoYBM5M`
 
-## Build & Run
+### 3. Get Recommendations
+Get recommendations based on a seed track.
 
-```bash
-npm start
-```
+- **URL**: `/recommendations/:id`
+- **Method**: `GET`
+- **Example**: `http://localhost:3012/recommendations/4PTG3Z6ehGkBFwjybzWkR8`
 
-## API Usage
+### 4. Get Full Recommendations
+Get recommendations with full track details.
 
-- **GET /spotifytoken**
-  - Returns a cached Spotify access token (auto-refresh if expired)
+- **URL**: `/recommendations/full/:id`
+- **Method**: `GET`
 
-Example:
-```bash
-curl http://localhost:3000/spotifytoken
-```
+## License
 
-## Integration: LavaSrc Custom Anonymous Token Endpoint
-
-This API can be used as a custom anonymous token endpoint for [LavaSrc](https://github.com/topi314/LavaSrc) and Lavalink (see [LavaSrc PR #286](https://github.com/topi314/LavaSrc/pull/286)).
-
-**Example LavaSrc on Lavalink config:**
-```yaml
-spotify:
-  preferAnonymousToken: true
-  customTokenEndpoint: "http://localhost:3000/spotifytoken"
-```
-
-## Notes
-- For deployment on server/CI, make sure Chromium is available:
-  - Use `npx playwright install chromium` for most environments.
-  - For Pterodactyl, upload Chromium manually and set `CHROME_PATH` in `.env`.
-- Request logs include IP and user-agent.
-
----
+MIT

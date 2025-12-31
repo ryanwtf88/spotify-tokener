@@ -1,7 +1,7 @@
 import { SpotifyBrowser } from "./browser";
 import { Semaphore } from "../utils/semaphore";
 import { logs } from "../utils/logger";
-import type { SpotifyToken, SpotifyClientToken } from "../types/spotify";
+import type { SpotifyToken, SpotifyClientToken, TokenProxy } from "../types/spotify";
 import type { Context } from "hono";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { handleRequest } from "./request";
@@ -17,6 +17,7 @@ export class SpotifyTokenHandler {
 	constructor() {
 		const initFetch = Date.now();
 		const tryInit = async (attempt = 1) => {
+			const release = await this.semaphore.acquire();
 			try {
 				const token = await this.getAccessToken();
 				this.accessToken = token;
@@ -31,11 +32,14 @@ export class SpotifyTokenHandler {
 				if (attempt < 3) {
 					setTimeout(() => tryInit(attempt + 1), 2000 * attempt); // retry with backoff
 				}
+			} finally {
+				release();
 			}
 		};
 		tryInit();
 
 		const tryInitClient = async (attempt = 1) => {
+			const release = await this.semaphore.acquire();
 			try {
 				const token = await this.getClientToken();
 				this.clientToken = token;
@@ -50,6 +54,8 @@ export class SpotifyTokenHandler {
 				if (attempt < 3) {
 					setTimeout(() => tryInitClient(attempt + 1), 2000 * attempt);
 				}
+			} finally {
+				release();
 			}
 		};
 		tryInitClient();
@@ -123,9 +129,19 @@ export class SpotifyTokenHandler {
 		}, refreshIn);
 	}
 
-	private getAccessToken = async (
+	public getAccessToken = async (
 		cookies?: Array<{ name: string; value: string }>,
 	): Promise<SpotifyToken> => {
+		if (!cookies || cookies.length === 0) {
+			if (
+				this.accessToken &&
+				(this.accessToken.accessTokenExpirationTimestampMs || 0) - 10000 >
+					Date.now()
+			) {
+				return this.accessToken;
+			}
+		}
+
 		return new Promise<SpotifyToken>((resolve, reject) => {
 			const run = async () => {
 				try {
@@ -142,7 +158,7 @@ export class SpotifyTokenHandler {
 		});
 	};
 
-	private getClientToken = async (): Promise<SpotifyClientToken> => {
+	public getClientToken = async (): Promise<SpotifyClientToken> => {
 		return new Promise<SpotifyClientToken>((resolve, reject) => {
 			const run = async () => {
 				try {
@@ -164,8 +180,14 @@ export class SpotifyTokenHandler {
 		const isForce = ["1", "yes", "true"].includes(
 			(c.req.query("force") || "").toLowerCase(),
 		);
-		const connInfo = getConnInfo(c);
-		let ip = connInfo?.remote?.address || "unknown";
+		let ip = "unknown";
+		try {
+			const connInfo = getConnInfo(c);
+			ip = connInfo?.remote?.address || "unknown";
+		} catch {
+			ip = c.req.header("x-forwarded-for") || "unknown";
+		}
+		
 		if (ip === "::1") {
 			ip = "127.0.0.1";
 		} else if (ip.startsWith("::ffff:")) {
@@ -245,3 +267,4 @@ export class SpotifyTokenHandler {
 		return result;
 	};
 }
+

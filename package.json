@@ -5,18 +5,19 @@
 	"main": "dist/index.js",
 	"private": true,
 	"author": {
-		"email": "kiyomi@mjba.my",
-		"name": "iaMJ"
+		"email": "ryanwtf88@gmail.com",
+		"name": "RY4N"
 	},
 	"license": "MIT",
 	"lint-staged": {
 		"*.ts": [
-			"pnpm format"
+			"bun format"
 		]
 	},
 	"scripts": {
-		"start": "tsup && node dist/server.js",
-		"start:run": "node dist/server.js",
+		"start": "bun src/server.ts",
+		"dev": "bun --watch src/server.ts",
+		"build": "tsup",
 		"format": "biome format --write ./src",
 		"prepare": "husky"
 	},
