@@ -37,6 +37,7 @@ if (typeof Bun !== "undefined") {
 		fetch: app.fetch,
 		port: config.port,
 		hostname: "0.0.0.0",
+		idleTimeout: 60,
 	});
 	logs(
 		"info",

@@ -51,7 +51,8 @@ export async function fetchPlaylist(
 	});
 
 	if (!response.ok) {
-		throw new Error(`Spotify API error: ${response.statusText}`);
+		console.error("Fetch Playlist failed:", response.status, response.statusText);
+		throw new Error(`Spotify PARTNER API error: ${response.status} ${response.statusText}`);
 	}
 
 	const data = await response.json();

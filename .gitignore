@@ -9,6 +9,7 @@ out
 dist
 *.tgz
 *.zip
+scripts
 
 # code coverage
 coverage

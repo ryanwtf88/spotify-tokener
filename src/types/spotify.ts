@@ -101,7 +101,9 @@ export interface SpotifyTrack {
 	is_playable?: boolean;
 	name: string;
 	popularity: number | null;
-	preview_url: string | null;
+//preview_url: string | null;
+	previewUrl?: string | null;
+	isPreview?: boolean;
 	track_number?: number;
 	type: "track";
 	uri: string;
